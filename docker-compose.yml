@@ -1,0 +1,69 @@
+name: rcll-portable
+services:
+  mongodb:
+    image: mongo:4.4
+    container_name: rcll-mongodb
+    restart: unless-stopped
+    command: ["mongod", "--bind_ip_all", "--port", "27017"]
+    volumes:
+      - ./data/mongodb:/data/db
+    healthcheck:
+      test: ["CMD", "mongo", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  refbox:
+    image: quay.io/robocup-logistics/rcll-refbox:latest
+    container_name: rcll-refbox
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    command: ["llsf-refbox", "--cfg-challenges", "/etc/rcll-refbox/challenges/thopen/nav_hard.yaml", "--cfg-comm", "/etc/rcll-refbox/comm/raikmitl_comm.yaml"]
+    volumes:
+      - ./config/refbox:/etc/rcll-refbox:ro
+      - ./logs/refbox:/logs
+    ports:
+      - "4444:4444/tcp"
+      - "4444:4444/udp"
+      - "4445:4445/udp"
+      - "4441:4441/udp"
+      - "4446:4446/udp"
+      - "4442:4442/udp"
+      - "4447:4447/udp"
+      - "1234:1234/tcp"
+      - "8088:8088/tcp"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  refbox-frontend:
+    image: quay.io/robocup-logistics/rcll-refbox-frontend:latest
+    container_name: rcll-refbox-frontend
+    restart: unless-stopped
+    depends_on: [refbox]
+    ports:
+      - "8080:80"
+
+  mqtt-broker:
+    image: eclipse-mosquitto:2
+    container_name: rcll-mqtt-broker
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+      - "1884:1884"
+    volumes:
+      - ./config/mosquitto:/mosquitto/config:ro
+      - ./data/mosquitto:/mosquitto/data
+      - ./logs/mosquitto:/mosquitto/log
+
+  mqtt-bridge:
+    image: ghcr.io/robocup-logistics/rcll-mqtt-bridge:master
+    container_name: rcll-mqtt-bridge
+    restart: unless-stopped
+    depends_on: [mqtt-broker, refbox]
+    environment:
+      BROKER: ${RC_MQTT_BROKER:-tcp://mqtt-broker:1883}
+      REFBOX: ${RC_MQTT_REFBOX:-refbox}
+      TEAM: ${RC_MQTT_TEAM:-TEAM_CYAN}
+      KEY: ${RC_MQTT_KEY:-randomkey}
